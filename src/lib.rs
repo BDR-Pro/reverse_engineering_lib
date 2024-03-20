@@ -1,5 +1,6 @@
 use goblin::elf::Elf;
 use goblin::pe::PE;
+use goblin::Object;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use rand::Rng;
