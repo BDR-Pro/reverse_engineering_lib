@@ -1,3 +1,4 @@
+use goblin::elf::Elf;
 use goblin::pe::PE;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
@@ -10,7 +11,6 @@ use std::fs;
 use std::fs::File;
 use std::io::{self, Read};
 use std::process;
-
 pub fn calculate_entropy(file_path: &String) -> io::Result<f64> {
     let mut file = File::open(file_path)?;
     let mut buffer = Vec::new();
@@ -64,6 +64,25 @@ pub fn main() -> io::Result<()> {
             });
             println!("{}", file_content);
         }
+        "random" => random_edit(&mut content)?,
+
+        "pe-header" => {
+            let header_info = parse_pe_header(file_path);
+            println!("{:?}", header_info);
+            process::exit(1);
+        }
+        "elf-functions" => {
+            let functions = extract_function_names_from_elf(&content);
+            println!("{:?}", functions);
+            process::exit(1);
+        }
+        "entropy" => {
+            let entropy_results = calculate_entropy_by_offset(&content, 256); // Example window size
+            for (offset, entropy) in entropy_results {
+                println!("Offset: 0x{:x}, Entropy: {:.2}", offset, entropy);
+            }
+            process::exit(1);
+        }
         "edit" => {
             if args.len() == 5 {
                 let offset = usize::from_str_radix(&args[3], 16).unwrap_or_else(|_| {
@@ -75,31 +94,9 @@ pub fn main() -> io::Result<()> {
                     process::exit(1);
                 });
                 edit_file(&mut content, offset, new_value)?;
-            } else {
-                eprintln!("Usage for edit: cargo run -- edit <file_path> <offset> <new_value>");
-                process::exit(1);
             }
-        }
-        "random" => random_edit(&mut content)?,
-        _ => {
-            eprintln!("Invalid mode. Use 'view', 'edit', or 'random'.");
-            process::exit(1);
         }
 
-        "pe-header" => {
-            let header_info = parse_pe_header(&file_path)?;
-            println!("{:?}", header_info);
-        }
-        "elf-functions" => {
-            let functions = extract_function_names_from_elf(&content)?;
-            println!("{:?}", functions);
-        }
-        "entropy" => {
-            let entropy_results = calculate_entropy_by_offset(&content, 256); // Example window size
-            for (offset, entropy) in entropy_results {
-                println!("Offset: 0x{:x}, Entropy: {:.2}", offset, entropy);
-            }
-        }
         _ => {
             eprintln!("Invalid mode. Use 'view', 'edit', 'random', 'pe-header', 'elf-functions', or 'entropy'.");
             process::exit(1);
@@ -279,25 +276,22 @@ pub fn extract_detail_exe(
     Ok(details)
 }
 
-#[derive(Debug)]
-struct PeHeaderInfo {
-    machine: u16,
-    number_of_sections: u16,
-}
-
-fn parse_pe_header(file_path: &PathBuf) -> Result<PeHeaderInfo, FindError> {
+pub fn parse_pe_header(file_path: &str) -> Result<goblin::pe::header::Header, Box<dyn Error>> {
+    // Open the file at the given path
     let mut file = File::open(file_path)?;
+
+    // Read the file's contents into a buffer
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
-    let pe = PeFile::from_bytes(&buffer)?;
 
-    Ok(PeHeaderInfo {
-        machine: pe.file_header().Machine,
-        number_of_sections: pe.file_header().NumberOfSections,
-    })
+    // Parse the buffer as a PE file
+    let pe = PE::parse(&buffer)?;
+
+    // Return the PE header
+    Ok(pe.header)
 }
-
-fn extract_function_names_from_elf(bytes: &[u8]) -> Result<Vec<String>, goblin::error::Error> {
+#[allow(deprecated)]
+pub fn extract_function_names_from_elf(bytes: &[u8]) -> Result<Vec<String>, goblin::error::Error> {
     let elf = Elf::parse(bytes)?;
     let mut function_names = Vec::new();
     for sym in elf.syms.iter() {
@@ -312,7 +306,7 @@ fn extract_function_names_from_elf(bytes: &[u8]) -> Result<Vec<String>, goblin::
     Ok(function_names)
 }
 
-fn calculate_entropy_by_offset(data: &[u8], window_size: usize) -> Vec<(usize, f64)> {
+pub fn calculate_entropy_by_offset(data: &[u8], window_size: usize) -> Vec<(usize, f64)> {
     let mut results = Vec::new();
     let mut offset = 0;
 
@@ -326,7 +320,7 @@ fn calculate_entropy_by_offset(data: &[u8], window_size: usize) -> Vec<(usize, f
     results
 }
 
-fn calculate_entropy_byte(data: &[u8]) -> f64 {
+pub fn calculate_entropy_byte(data: &[u8]) -> f64 {
     let mut frequency = HashMap::new();
 
     for &byte in data {
