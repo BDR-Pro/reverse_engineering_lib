@@ -1,6 +1,6 @@
 # Reverse Engineering Lib 🕵️‍♂️🔍
 
-Welcome to **reverse_engineering_lib**, your go-to Rust crate for peeling back the layers of binaries and understanding their innards! Whether you're a cybersecurity enthusiast, a malware analyst, or just plain curious about what makes executables tick, this crate has got your back. 
+Welcome to **reverse_engineering_lib**, your go-to Rust crate for peeling back the layers of binaries and understanding their innards! Whether you're a cybersecurity enthusiast, a malware analyst, or just plain curious about what makes executables tick, this crate has got your back.
 
 ## Features 🌟
 
@@ -64,6 +64,48 @@ Big shoutout to the developers of the Rust programming language, the creators of
 ### Example `main.rs` 📂
 
 For a practical example of how to use **reverse_engineering_lib**, check out the provided `main.rs` file in the repository. It's a ready-to-run showcase of the library's capabilities.
+
+## Here's a brief overview of the modes it supports
+
+### For `pe-header` Mode
+
+Given a PE file, this mode prints out the basic PE header information:
+
+```plaintext
+
+$ cargo run -- pe-header path/to/pe_file.exe
+PeHeaderInfo { machine: 34404, number_of_sections: 5 }
+
+```
+
+This output indicates that the PE file is for an x64 architecture (`machine: 34404` corresponds to AMD64) and contains 5 sections.
+
+### For `elf-functions` Mode
+
+Given an ELF file, this mode lists the names of functions found in the ELF file:
+
+```plaintext
+
+$ cargo run -- elf-functions path/to/elf_file
+["main", "_start", "printf", "exit"]
+
+```
+
+This example output shows the ELF file contains functions like `main`, `_start`, `printf`, and `exit`.
+
+### For `entropy` Mode
+
+This mode calculates and displays the entropy of segments (or "windows") of a file, which can indicate its randomness:
+
+```plaintext
+$ cargo run -- entropy path/to/any_file
+Offset: 0x0, Entropy: 7.95
+Offset: 0x100, Entropy: 5.47
+Offset: 0x200, Entropy: 3.58
+
+```
+
+Here, the entropy values are hypothetical and show that the file starts with high randomness (entropy close to 8), which decreases in later sections. High entropy could indicate compressed or encrypted data.
 
 ---
 

@@ -1,15 +1,15 @@
-use std::env;
-use std::fs;
-use std::process;
-use sha2::{Sha256, Digest};
-use rand::thread_rng;
-use rand::prelude::SliceRandom;
-use rand::Rng;
-use std::io::{self, Read}; 
-use std::error::Error;
 use goblin::pe::PE;
+use rand::prelude::SliceRandom;
+use rand::thread_rng;
+use rand::Rng;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::env;
+use std::error::Error;
+use std::fs;
 use std::fs::File;
+use std::io::{self, Read};
+use std::process;
 
 pub fn calculate_entropy(file_path: &String) -> io::Result<f64> {
     let mut file = File::open(file_path)?;
@@ -34,7 +34,7 @@ pub fn calculate_entropy(file_path: &String) -> io::Result<f64> {
 }
 
 //return a vector of 8-bit color values based on the file content
-pub fn color_based_hex(file_path: String) -> Result<Vec<u8>, Box<dyn Error>>{
+pub fn color_based_hex(file_path: String) -> Result<Vec<u8>, Box<dyn Error>> {
     let mut file = File::open(file_path)?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
@@ -46,7 +46,7 @@ pub fn color_based_hex(file_path: String) -> Result<Vec<u8>, Box<dyn Error>>{
 pub fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
-        eprintln!("Usage: cargo run -- <view/edit/random> <file_path> [<offset> <new_value>]");
+        eprintln!("Usage: cargo run -- <view/edit/random/pe-header/elf-functions/entropy> <file_path> [<offset> <new_value>]");
         process::exit(1);
     }
 
@@ -79,16 +79,31 @@ pub fn main() -> io::Result<()> {
                 eprintln!("Usage for edit: cargo run -- edit <file_path> <offset> <new_value>");
                 process::exit(1);
             }
-        },
+        }
         "random" => random_edit(&mut content)?,
         _ => {
             eprintln!("Invalid mode. Use 'view', 'edit', or 'random'.");
             process::exit(1);
-        },
-    }
+        }
 
-    if mode != "view" {
-        fs::write(file_path, &content)?;
+        "pe-header" => {
+            let header_info = parse_pe_header(&file_path)?;
+            println!("{:?}", header_info);
+        }
+        "elf-functions" => {
+            let functions = extract_function_names_from_elf(&content)?;
+            println!("{:?}", functions);
+        }
+        "entropy" => {
+            let entropy_results = calculate_entropy_by_offset(&content, 256); // Example window size
+            for (offset, entropy) in entropy_results {
+                println!("Offset: 0x{:x}, Entropy: {:.2}", offset, entropy);
+            }
+        }
+        _ => {
+            eprintln!("Invalid mode. Use 'view', 'edit', 'random', 'pe-header', 'elf-functions', or 'entropy'.");
+            process::exit(1);
+        }
     }
 
     Ok(())
@@ -141,7 +156,10 @@ pub fn view_file(file_path: &str) -> io::Result<String> {
 pub fn edit_file(content: &mut Vec<u8>, offset: usize, new_value: u8) -> io::Result<()> {
     if offset < content.len() {
         content[offset] = new_value;
-        println!("Byte at offset {:x} has been changed to {:02x}.", offset, new_value);
+        println!(
+            "Byte at offset {:x} has been changed to {:02x}.",
+            offset, new_value
+        );
     } else {
         eprintln!("Offset {:x} is out of bounds.", offset);
     }
@@ -150,22 +168,26 @@ pub fn edit_file(content: &mut Vec<u8>, offset: usize, new_value: u8) -> io::Res
 
 pub fn random_edit(content: &mut Vec<u8>) -> io::Result<()> {
     let mut rng = thread_rng();
-    let positions: Vec<usize> = content.iter().enumerate()
+    let positions: Vec<usize> = content
+        .iter()
+        .enumerate()
         .filter(|&(_, &value)| value == 0x00)
         .map(|(i, _)| i)
         .collect();
-    
+
     if let Some(&pos) = positions.choose(&mut rng) {
         let random_value: u8 = rng.gen();
         content[pos] = random_value;
-        println!("Byte at random zero position {:x} has been changed to {:02x}.", pos, random_value);
+        println!(
+            "Byte at random zero position {:x} has been changed to {:02x}.",
+            pos, random_value
+        );
     } else {
         println!("No zero bytes to replace.");
     }
 
     Ok(())
 }
-
 
 pub fn save_hash(content: &[u8]) -> io::Result<()> {
     let mut hasher = Sha256::new();
@@ -174,14 +196,15 @@ pub fn save_hash(content: &[u8]) -> io::Result<()> {
     let hash_str = format!("{:x}", hash);
     println!("SHA256: {}", hash_str);
     let first_64_bits = &hash_str[..16];
-    let name = format!("{}.txt", first_64_bits );
+    let name = format!("{}.txt", first_64_bits);
     print!("Saving hash to file {}... ", name);
     fs::write(name, hash_str)?;
     Ok(())
 }
 
-
-pub fn extract_detail_exe(file_path: &String) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+pub fn extract_detail_exe(
+    file_path: &String,
+) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
     let mut file = File::open(file_path)?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
@@ -193,27 +216,52 @@ pub fn extract_detail_exe(file_path: &String) -> Result<HashMap<String, String>,
             details.insert("Entry Point".to_string(), format!("0x{:x}", pe.entry));
 
             // COFF Header details
-            details.insert("Machine".to_string(), format!("0x{:x}", pe.header.coff_header.machine));
-            details.insert("Number of Sections".to_string(), pe.header.coff_header.number_of_sections.to_string());
-            details.insert("Time Date Stamp".to_string(), pe.header.coff_header.time_date_stamp.to_string());
-            details.insert("Pointer to Symbol Table".to_string(), pe.header.coff_header.pointer_to_symbol_table.to_string());
-            details.insert("Number of Sections".to_string(), pe.header.coff_header.number_of_sections.to_string());
-            details.insert("Size of Optional Header".to_string(), pe.header.coff_header.size_of_optional_header.to_string());
-            details.insert("Characteristics".to_string(), format!("0x{:x}", pe.header.coff_header.characteristics));
+            details.insert(
+                "Machine".to_string(),
+                format!("0x{:x}", pe.header.coff_header.machine),
+            );
+            details.insert(
+                "Number of Sections".to_string(),
+                pe.header.coff_header.number_of_sections.to_string(),
+            );
+            details.insert(
+                "Time Date Stamp".to_string(),
+                pe.header.coff_header.time_date_stamp.to_string(),
+            );
+            details.insert(
+                "Pointer to Symbol Table".to_string(),
+                pe.header.coff_header.pointer_to_symbol_table.to_string(),
+            );
+            details.insert(
+                "Number of Sections".to_string(),
+                pe.header.coff_header.number_of_sections.to_string(),
+            );
+            details.insert(
+                "Size of Optional Header".to_string(),
+                pe.header.coff_header.size_of_optional_header.to_string(),
+            );
+            details.insert(
+                "Characteristics".to_string(),
+                format!("0x{:x}", pe.header.coff_header.characteristics),
+            );
 
             // Section Headers
             for (index, section) in pe.sections.iter().enumerate() {
                 let section_name = format!("Section {} Name", index + 1);
-                let section_detail = format!("Virtual Size: 0x{:x}, Virtual Address: 0x{:x}",
-                                             section.virtual_size, section.virtual_address);
+                let section_detail = format!(
+                    "Virtual Size: 0x{:x}, Virtual Address: 0x{:x}",
+                    section.virtual_size, section.virtual_address
+                );
                 details.insert(section_name, section_detail);
             }
 
             // Imports
             for (index, import) in pe.imports.iter().enumerate() {
                 let import_name = format!("Import {} Name", index + 1);
-                let import_fields = format!("DLL: {}, Ordinal: {}, Offset: {}, RVA: 0x{:x}, Size: {}", 
-                                            import.dll, import.ordinal, import.offset, import.rva, import.size);
+                let import_fields = format!(
+                    "DLL: {}, Ordinal: {}, Offset: {}, RVA: 0x{:x}, Size: {}",
+                    import.dll, import.ordinal, import.offset, import.rva, import.size
+                );
                 details.insert(import_name, import_fields);
             }
             // Exports
@@ -224,12 +272,70 @@ pub fn extract_detail_exe(file_path: &String) -> Result<HashMap<String, String>,
                     details.insert(export_name, export_detail);
                 }
             }
-
-        },
+        }
         Err(err) => return Err(Box::new(err)),
     }
 
     Ok(details)
 }
 
+#[derive(Debug)]
+struct PeHeaderInfo {
+    machine: u16,
+    number_of_sections: u16,
+}
 
+fn parse_pe_header(file_path: &PathBuf) -> Result<PeHeaderInfo, FindError> {
+    let mut file = File::open(file_path)?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    let pe = PeFile::from_bytes(&buffer)?;
+
+    Ok(PeHeaderInfo {
+        machine: pe.file_header().Machine,
+        number_of_sections: pe.file_header().NumberOfSections,
+    })
+}
+
+fn extract_function_names_from_elf(bytes: &[u8]) -> Result<Vec<String>, goblin::error::Error> {
+    let elf = Elf::parse(bytes)?;
+    let mut function_names = Vec::new();
+    for sym in elf.syms.iter() {
+        if let Some(Ok(name)) = elf
+            .strtab
+            .get(sym.st_name)
+            .map(|res| res.map(|s| s.to_string()))
+        {
+            function_names.push(name);
+        }
+    }
+    Ok(function_names)
+}
+
+fn calculate_entropy_by_offset(data: &[u8], window_size: usize) -> Vec<(usize, f64)> {
+    let mut results = Vec::new();
+    let mut offset = 0;
+
+    while offset + window_size <= data.len() {
+        let window = &data[offset..offset + window_size];
+        let entropy = calculate_entropy_byte(window);
+        results.push((offset, entropy));
+        offset += window_size;
+    }
+
+    results
+}
+
+fn calculate_entropy_byte(data: &[u8]) -> f64 {
+    let mut frequency = HashMap::new();
+
+    for &byte in data {
+        *frequency.entry(byte).or_insert(0) += 1;
+    }
+
+    let len = data.len() as f64;
+    frequency.values().fold(0.0, |acc, &count| {
+        let probability = count as f64 / len;
+        acc - (probability * probability.log2())
+    })
+}
