@@ -1,6 +1,6 @@
 [package]
 name = "reverse_engineering_lib"
-version = "0.2.0"
+version = "0.2.2"
 edition = "2021"
 description = "A Rust library for reverse engineering tasks, including entropy calculation, color-based hex visualization, and PE file analysis."
 repository = "https://github.com/bdr-pro/reverse_engineering_lib"

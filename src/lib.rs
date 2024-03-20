@@ -46,7 +46,7 @@ pub fn color_based_hex(file_path: String) -> Result<Vec<u8>, Box<dyn Error>> {
 pub fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
-        eprintln!("Usage: cargo run -- <view/edit/random/pe-header/elf-functions/entropy> <file_path> [<offset> <new_value>]");
+        eprintln!("Usage: cargo run -- <view/edit/random/pe-header/elf-functions/entropy/strings> <file_path> [<offset> <new_value>]");
         process::exit(1);
     }
 
@@ -96,7 +96,15 @@ pub fn main() -> io::Result<()> {
                 edit_file(&mut content, offset, new_value)?;
             }
         }
-
+        "strings" => {
+            let strings = extract_strings(file_path).unwrap_or_else(|e| {
+                eprintln!("Error extracting strings: {}", e);
+                process::exit(1);
+            });
+            for string in strings {
+                println!("{}", string);
+            }
+        }
         _ => {
             eprintln!("Invalid mode. Use 'view', 'edit', 'random', 'pe-header', 'elf-functions', or 'entropy'.");
             process::exit(1);
@@ -332,4 +340,81 @@ pub fn calculate_entropy_byte(data: &[u8]) -> f64 {
         let probability = count as f64 / len;
         acc - (probability * probability.log2())
     })
+}
+
+pub fn extract_strings(file_path: &str) -> Result<Vec<String>, Box<dyn Error>> {
+    let mut file = File::open(file_path)?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+
+    let obj = Object::parse(&buffer)?;
+    let strings = match obj {
+        Object::PE(pe) => extract_strings_from_pe_sections(&pe.sections, &buffer),
+        Object::Elf(elf) => Ok(extract_strings_from_elf_sections(
+            &elf.section_headers,
+            &buffer,
+        )),
+        _ => Err("Unsupported format".into()),
+    }?;
+
+    Ok(strings)
+}
+
+fn extract_strings_from_pe_sections(
+    sections: &[goblin::pe::section_table::SectionTable],
+    buffer: &[u8],
+) -> Result<Vec<String>, Box<dyn Error>> {
+    let mut strings = Vec::new();
+    for section in sections {
+        let start = section.pointer_to_raw_data as usize;
+        let end = start + section.size_of_raw_data as usize;
+
+        if start < buffer.len() && end <= buffer.len() {
+            let section_data = &buffer[start..end];
+
+            let mut current_string = Vec::new();
+            for &byte in section_data {
+                if byte.is_ascii_graphic() || byte == b' ' {
+                    current_string.push(byte);
+                } else if byte == 0 && !current_string.is_empty() {
+                    if current_string.len() > 4 {
+                        if let Ok(string) = String::from_utf8(current_string.clone()) {
+                            strings.push(string);
+                        }
+                    }
+                    current_string.clear();
+                }
+            }
+        }
+    }
+
+    Ok(strings)
+}
+
+fn extract_strings_from_elf_sections(
+    headers: &[goblin::elf::section_header::SectionHeader],
+    buffer: &[u8],
+) -> Vec<String> {
+    let mut strings = Vec::new();
+
+    for header in headers {
+        let start = header.sh_offset as usize;
+        let end = start + header.sh_size as usize;
+        let section_data = &buffer[start..end];
+
+        let mut current_string = Vec::new();
+        for &byte in section_data {
+            if byte.is_ascii_graphic() || byte == b' ' {
+                current_string.push(byte);
+            } else if byte == 0 && !current_string.is_empty() {
+                if current_string.len() > 4 {
+                    if let Ok(string) = String::from_utf8(current_string.clone()) {
+                        strings.push(string);
+                    }
+                }
+                current_string.clear();
+            }
+        }
+    }
+    strings
 }
