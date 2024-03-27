@@ -107,6 +107,42 @@ Offset: 0x200, Entropy: 3.58
 
 Here, the entropy values are hypothetical and show that the file starts with high randomness (entropy close to 8), which decreases in later sections. High entropy could indicate compressed or encrypted data.
 
+### Disassembler Mode
+
+This mode disassembles the given binary file and prints the disassembled instructions:
+
+```bash
+
+0x14af: nop
+0x14b0: call    0xcc30
+0x14b5: cmp     eax, 0xa
+0x14b8: je      0x14bf
+0x14ba: cmp     eax, -1
+0x14bd: jne     0x14b0
+0x14bf: mov     eax, dword ptr [rbp - 4]
+0x14c2: cmp     eax, dword ptr [rip + 0x424330]
+0x14c8: jle     0x14da
+
+
+```
+
+This output shows the disassembled instructions at different memory addresses in the binary file.
+
+```rust
+use reverse_engineering_lib::disassemble;
+
+fn main() {
+    let file_path =
+        "{your_binary_file_path_here.exe}";
+    match disassemble(&file_path) {
+        Ok(disassembly) => println!("{}", disassembly),
+        Err(e) => eprintln!("Disassembly failed: {}", e),
+    }
+}
+
+
+```
+
 ---
 
 Happy reverse engineering! 🚀👨‍💻👩‍💻

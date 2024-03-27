@@ -1,7 +1,9 @@
-use reverse_engineering_lib::parse_pe_header;
+use reverse_engineering_lib::disassemble;
 
 fn main() {
-    let file_path = "C:\\Windows\\System32\\notepad.exe";
-    let pe_header = parse_pe_header(file_path).unwrap();
-    println!("{:?}", pe_header);
+    let file_path = "test_files/elf64_test";
+    match disassemble(&file_path) {
+        Ok(disassembly) => println!("{}", disassembly),
+        Err(e) => eprintln!("Disassembly failed: {}", e),
+    }
 }

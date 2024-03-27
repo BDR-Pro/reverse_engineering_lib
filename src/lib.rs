@@ -1,3 +1,5 @@
+use capstone::arch::x86::ArchSyntax;
+use capstone::prelude::*;
 use goblin::elf::Elf;
 use goblin::pe::PE;
 use goblin::Object;
@@ -8,10 +10,12 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
+use std::fmt::Write;
 use std::fs;
 use std::fs::File;
 use std::io::{self, Read};
 use std::process;
+
 pub fn calculate_entropy(file_path: &String) -> io::Result<f64> {
     let mut file = File::open(file_path)?;
     let mut buffer = Vec::new();
@@ -418,4 +422,91 @@ fn extract_strings_from_elf_sections(
         }
     }
     strings
+}
+pub fn disassemble(file_path: &str) -> Result<String, String> {
+    let buffer = fs::read(file_path).map_err(|e| e.to_string())?;
+
+    // Initialize an empty String to collect information
+    let mut result_string = String::new();
+
+    match Object::parse(&buffer) {
+        Ok(Object::Elf(elf)) => {
+            // Append ELF header information to the result string
+            writeln!(
+                result_string,
+                "ELF Type: {}\nEntry Point: 0x{:X}",
+                elf.header.e_type, elf.header.e_entry
+            )
+            .unwrap();
+
+            // Find and disassemble .text section, then append
+            if let Some(text_section) = elf
+                .section_headers
+                .iter()
+                .find(|sh| elf.shdr_strtab.get_at(sh.sh_name) == Some(".text"))
+            {
+                let code =
+                    &buffer[text_section.sh_offset as usize..][..text_section.sh_size as usize];
+                match disassemble_bin(code) {
+                    Ok(disassembly) => writeln!(result_string, "\n{}", disassembly).unwrap(),
+                    Err(e) => return Err(e.to_string()),
+                }
+            } else {
+                writeln!(result_string, "No .text section found in ELF").unwrap();
+            }
+        }
+        Ok(Object::PE(pe)) => {
+            // Append PE header information to the result string
+            let machine = pe.header.coff_header.machine;
+            let number_of_sections = pe.header.coff_header.number_of_sections;
+            writeln!(
+                result_string,
+                "PE Machine: {}\nNumber of Sections: {}\n",
+                machine, number_of_sections
+            )
+            .unwrap();
+
+            // Find and disassemble .text section, then append
+            if let Some(text_section) = pe.sections.iter().find(|section| {
+                std::str::from_utf8(&section.name)
+                    .unwrap_or_default()
+                    .trim_end_matches('\0')
+                    == ".text"
+            }) {
+                let code = &buffer[text_section.pointer_to_raw_data as usize..]
+                    [..text_section.size_of_raw_data as usize];
+                match disassemble_bin(code) {
+                    Ok(disassembly) => writeln!(result_string, "\n{}\n", disassembly).unwrap(),
+                    Err(e) => return Err(e.to_string()),
+                }
+            } else {
+                writeln!(result_string, "No .text section found in PE").unwrap();
+            }
+        }
+        _ => return Err("Unsupported or unknown file format".into()),
+    };
+
+    Ok(result_string)
+}
+
+fn disassemble_bin(code: &[u8]) -> capstone::CsResult<String> {
+    let cs = Capstone::new()
+        .x86()
+        .mode(arch::x86::ArchMode::Mode64)
+        .syntax(ArchSyntax::Intel)
+        .detail(true)
+        .build()?;
+
+    let insns = cs.disasm_all(code, 0x1000)?;
+    Ok(insns
+        .iter()
+        .map(|i| {
+            format!(
+                "0x{:x}: {}\t{}\n",
+                i.address(),
+                i.mnemonic().unwrap_or(""),
+                i.op_str().unwrap_or("")
+            )
+        })
+        .collect())
 }
